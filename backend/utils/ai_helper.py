@@ -17,37 +17,29 @@ logger = logging.getLogger(__name__)
 # Collects all keys and sorts them by provider
 raw_env_keys = os.getenv("GROQ_API_KEY", "").split(",")
 GROQ_KEYS = [k.strip() for k in raw_env_keys if k.strip().startswith("gsk_")]
-XAI_KEYS = [k.strip() for k in raw_env_keys if k.strip().startswith("xai-")]
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 
-# Add explicit xAI key support if provided separately
-extra_xai = os.getenv("XAI_API_KEY", "").split(",")
-XAI_KEYS.extend([k.strip() for k in extra_xai if k.strip()])
 
 def call_ai_with_retry(prompt, model="llama-3.3-70b-versatile", response_format=None):
     """
     Fallback Chain:
-    1. Try random Groq Key (70B model)
-    2. Try random xAI Key (Grok model)
+    1. Try NVIDIA Gemma
+    2. Try Groq (Fallback)
     3. Fallback to Groq 8B (High Limits)
     """
-    
-    # 1. Try xAI (Primary - based on user request)
-    if XAI_KEYS:
-        shuffled_xai = list(XAI_KEYS)
-        random.shuffle(shuffled_xai)
-        for key in shuffled_xai:
-            try:
-                # xAI is OpenAI compatible
-                xclient = OpenAI(api_key=key, base_url="https://api.x.ai/v1")
-                # xAI JSON mode works differently - usually best to just prompt for it
-                res = xclient.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    model="grok-beta", # Standard xAI model
-                )
-                return res.choices[0].message.content
-            except Exception as e:
-                logger.error(f"xAI Error: {str(e)}")
-                continue
+    # 1. Try NVIDIA Gemma (Primary - based on user request)
+    if NVIDIA_API_KEY:
+        try:
+            # NVIDIA NIM is OpenAI compatible
+            xclient = OpenAI(api_key=NVIDIA_API_KEY, base_url="https://integrate.api.nvidia.com/v1")
+            
+            res = xclient.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="google/gemma-3n-e2b-it",
+            )
+            return res.choices[0].message.content
+        except Exception as e:
+            logger.error(f"NVIDIA Gemma Error: {str(e)}")
 
     # 2. Try Groq (Fallback)
     if GROQ_KEYS:
@@ -81,7 +73,7 @@ def call_ai_with_retry(prompt, model="llama-3.3-70b-versatile", response_format=
         except:
             pass
             
-    raise Exception("All AI Providers (Groq Cloud & xAI) are currently exhausted. Please add more keys or try later.")
+    raise Exception("All AI Providers (NVIDIA NIM & Groq Cloud) are currently exhausted. Please add more keys or try later.")
 
 def analyze_with_groq(resume_text: str, job_description: str):
     """Main analysis with provider fallback."""
